@@ -74,3 +74,9 @@ app:
     use-case:
       api-key:
         request-per-minute: 2
+  kafka:
+    topics:
+      payment: payments.events
+      order: orders.events
+      refund: refund.events
+      settlement: settlement.events

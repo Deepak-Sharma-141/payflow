@@ -1,5 +1,6 @@
 package com.project.payflow.payment.service.impl;
 
+import com.project.payflow.common.enums.EventAggregateType;
 import com.project.payflow.common.enums.OrderStatus;
 import com.project.payflow.common.enums.PaymentEvent;
 import com.project.payflow.common.enums.PaymentStatus;
@@ -13,6 +14,7 @@ import com.project.payflow.payment.gateway.PaymentGatewayRouter;
 import com.project.payflow.payment.gateway.dto.PaymentRequest;
 import com.project.payflow.payment.gateway.dto.PaymentResult;
 import com.project.payflow.payment.mapper.PaymentMapper;
+import com.project.payflow.payment.outbox.OutboxEventPublisher;
 import com.project.payflow.payment.repository.OrderRepository;
 import com.project.payflow.payment.repository.PaymentRepository;
 import com.project.payflow.payment.service.PaymentService;
@@ -24,6 +26,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -36,6 +39,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentGatewayRouter paymentGatewayRouter;
     private final PaymentMapper paymentMapper;
     private final PaymentTransitionService paymentTransitionService;
+    private final OutboxEventPublisher eventPublisher;
 
     @Override
     @Transactional(isolation = Isolation.REPEATABLE_READ)
@@ -61,6 +65,7 @@ public class PaymentServiceImpl implements PaymentService {
                 .amount(order.getAmount())
                 .status(PaymentStatus.CREATED)
                 .method(request.method())
+                .idempotencyKey(UUID.randomUUID().toString()) //TODO: idempotency
                 .methodDetails(request.methodDetails())
                 .build();
 
@@ -89,6 +94,17 @@ public class PaymentServiceImpl implements PaymentService {
 
         payment = paymentRepository.save(payment);
         orderRepository.save(order);
+
+        eventPublisher.publish(EventAggregateType.PAYMENT, payment.getId(), "PAYMENT_CREATED",
+                Map.of( "orderId", order.getId().toString(),
+                        "paymentId", payment.getId().toString(),
+                        "merchantId", merchantId.toString(),
+                        "PaymentStatus", payment.getStatus().name(),
+                        "amountUnits", order.getAmount().getAmountUnits(),
+                        "amountCurrency", order.getAmount().getCurrency(),
+                        "paymentMethod", payment.getMethod()
+                )
+        );
 
         return paymentMapper.toResponse(payment);
     }
@@ -122,6 +138,17 @@ public class PaymentServiceImpl implements PaymentService {
         }
 
         payment = paymentRepository.save(payment);
+
+        eventPublisher.publish(EventAggregateType.PAYMENT, payment.getId(), "PAYMENT_STATUS_CHANGED",
+                Map.of( "orderId", payment.getOrder().getId().toString(),
+                        "paymentId", payment.getId().toString(),
+                        "merchantId", merchantId.toString(),
+                        "PaymentStatus", payment.getStatus().name(),
+                        "amountUnits", payment.getOrder().getAmount().getAmountUnits(),
+                        "amountCurrency", payment.getOrder().getAmount().getCurrency(),
+                        "paymentMethod", payment.getMethod()
+                )
+        );
 
         return paymentMapper.toResponse(payment);
     }
@@ -168,6 +195,17 @@ public class PaymentServiceImpl implements PaymentService {
         }
         paymentRepository.save(payment);
         orderRepository.save(orderRecord);
+
+        eventPublisher.publish(EventAggregateType.PAYMENT, payment.getId(), "PAYMENT_STATUS_CHANGED",
+                Map.of( "orderId", payment.getOrder().getId().toString(),
+                        "paymentId", payment.getId().toString(),
+                        "merchantId", payment.getMerchantId().toString(),
+                        "PaymentStatus", payment.getStatus().name(),
+                        "amountUnits", payment.getOrder().getAmount().getAmountUnits(),
+                        "amountCurrency", payment.getOrder().getAmount().getCurrency(),
+                        "paymentMethod", payment.getMethod()
+                )
+        );
     }
 }
 
